@@ -1,4 +1,10 @@
-%run /Workspace/Projects/Experimentation/aaml-experimentation-coe/exp_coe_utils
+# Databricks notebook source
+# DBTITLE 1,Imports
+# MAGIC %run /Workspace/Projects/Experimentation/aaml-experimentation-coe/exp_coe_utils
+
+# COMMAND ----------
+
+# DBTITLE 1,Notebook set up
 ##---------------------------------------------------------------------------------------------------------------------------##
 ## System & Notebook Setup                                                                                                   
 
@@ -26,8 +32,15 @@ pd.set_option('display.max_colwidth', 0)
 #dbutils.widgets.removeAll()
 
 ##---------------------------------------------------------------------------------------------------------------------------##   
-%md
-# Set up
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Set up
+
+# COMMAND ----------
+
+# DBTITLE 1,Optional Get Adobe Experiment ID from ACIP#
 ### Obtain the Adobe Experiment ID (Campaign ID)
 ### If an ACIP# is input into the '01. Experiment Identifier' field, then this will look up the Campaign ID by using the CAMPAIGN_DSC field in the ADOBE_TNT table.
 ### If an Adobe Experiment (Campaign ID) is provided, then this will check the ADOBE_TNT table to ensure that it is a valid ID
@@ -60,6 +73,10 @@ else:
   EXPERIMENT_ID = str(getArgument("01. Experiment Identifier").replace('-', '_'))
 
 print('Experiment ID = {}'.format(EXPERIMENT_ID))
+
+# COMMAND ----------
+
+# DBTITLE 1,Get Inputs from Notebook
 EXP_START_DATE = getArgument("02. Start Date")
 
 ### If a date in the future is provided for end date, then this will correct and run the notebook up until yesterday
@@ -82,6 +99,10 @@ OS_PLATFORM = getArgument("12. OS Platform")
 banner_selected = getArgument("13. Exclude Banner Filter")
 WINSORIZE = getArgument("14. Winsorization")
 control_variant_nm = 'VARIANT A'
+
+# COMMAND ----------
+
+# DBTITLE 1,Experiment Implementation
 one_control = f"""CASE
       WHEN post_tnt LIKE '%{EXPERIMENT_ID}:0:0%' THEN 'VARIANT A'
       WHEN post_tnt LIKE '%{EXPERIMENT_ID}:1:0%' THEN 'VARIANT B'
@@ -123,12 +144,20 @@ elif EXP_PLATFORM == 'Email':
   email_table = 'gcp-abs-udco-bsvw-prod-prj-01.udco_ds_bizops.SQ_EMAIL_DATA'
 
 print('Experiment ID = {}'.format(EXPERIMENT_ID))
+
+# COMMAND ----------
+
+# DBTITLE 1,DBFS Link
 ### Use to direct the metric queries to a pre-run set of tables, identified by the DBFS_LINK
 
 if METRIC_QUERIES == 'DBFS Link' and not DBFS_LINK:
    displayHTML("""<h3><font color="red"> !WARNING! The Metric Query input is set to 'DBFS Link', but did not provide a link. </font></h3>""")
      
 print('Metric Query Approach: ', METRIC_QUERIES)
+
+# COMMAND ----------
+
+# DBTITLE 1,Page Filter
 ### Page filter can accept list of strings separated by "," or ", "
 ### Checkout consists of multiple steps and each can contain 'order confirmation'
 
@@ -154,6 +183,10 @@ if PAGE_FILTER_INPUT:
 else:
   page_filter = ""
   print("No page filter")
+
+# COMMAND ----------
+
+# DBTITLE 1,Banner Filter
 if banner_selected != 'None' and banner_selected.strip() != '':
    # Splitting the input string by commas and converting to lowercase
    selected_banners = banner_selected.split(',')
@@ -172,6 +205,10 @@ else:
    banner_filter = ""
 print(banner_filter)
 print(banner_selected)
+
+# COMMAND ----------
+
+# DBTITLE 1,OS Platform Filter
 if OS_PLATFORM != 'None':
     if EXP_PLATFORM == 'Adobe':
         os_platform_filter = []
@@ -220,7 +257,15 @@ else:
 print(os_platform_filter)
 print(OS_PLATFORM)
 
+
+# COMMAND ----------
+
+# DBTITLE 1,3P HouseHold filter
 household_3p_filter = f''' (safe_cast(HOUSEHOLD_ID as INT) not in (select HOUSEHOLD_ID from gcp-abs-udco-bsvw-prod-prj-01.aamp_ds_datascience.EXP_COE_3P_HHS_LIST) OR HOUSEHOLD_ID is NULL) '''
+
+# COMMAND ----------
+
+# DBTITLE 1,Winsorize SQL
 if WINSORIZE == '99th':
   ## If 99th percentile is equal to $0, then winsorization is ignored.
   metric_rpc_sql = '''CASE WHEN (SELECT TOT_REVENUE_WIN99 FROM WINZ) > 0 AND TOT_REVENUE > (SELECT TOT_REVENUE_WIN99 FROM WINZ) THEN (SELECT TOT_REVENUE_WIN99 FROM WINZ) ELSE TOT_REVENUE END'''
@@ -228,12 +273,20 @@ if WINSORIZE == '99th':
 else:
   metric_rpc_sql = 'TOT_REVENUE'
   metric_nspc_sql = 'TOT_NET_SALES'
+
+# COMMAND ----------
+
+# DBTITLE 1,Exposure  Check
 try:
   exposure_sp_check = spark.sql("SELECT MIN(DATE(EXPOSURE_DATETIME)) as FIRST_EXPOSED_DATE, MAX(DATE(EXPOSURE_DATETIME)) as LAST_EXPOSED_DATE FROM experimentation.exposure_sp_{}".format(EXPERIMENT_ID))
   display(exposure_sp_check)
   
 except:
   print('No exposure table available.')
+
+# COMMAND ----------
+
+# DBTITLE 1,DBFS Check
 if METRIC_QUERIES == 'Standard':
   standard_sp_check = spark.sql("SELECT MIN(DATE(TXN_DTE)) as FIRST_DATE, MAX(DATE(TXN_DTE)) as LAST_DATE FROM db_work.EXP_COE_COMBINED_TXNS_GCP")
   standard_check = standard_sp_check.select("*").toPandas()
@@ -273,6 +326,10 @@ else:
                 <h3><font color="black"> CUSTOM METRIC QUERY USED. </font></h3>
                 <h3><font color="orange"> !WARNING! May take longer to run the notebook with this setting.  For shorter runs, please use the Standard or the DBFS options for the Metric Query parameter. </font></h3>   
                 <p><font color="black"> Experiment_ID: {} </font></p> """.format(EXPERIMENT_ID))
+
+# COMMAND ----------
+
+# DBTITLE 1,Metric Query Table Logic
 ### If a DBFS link is provided, then the notebook will point to those tables.
 ### If metric queries are set to "Custom" then this notebook will kick off a worfkflow for metrics during the time of the experiment and save them into a DBFS location.
 ### If "Standard", then the notebook will access data from the standard metric workflows that execute daily.
@@ -312,12 +369,20 @@ else:
   basket_health_table = "db_work.EXP_COE_BASKET_HEALTH_GCP"
   category_table = "db_work.EXP_COE_CATEGORY_TXNS_GCP"
   account_health_table = "db_work.EXP_COE_ACC_HEALTH_GCP"
+
+# COMMAND ----------
+
+# DBTITLE 1,STOP Notebook if DBFS does not match Run Dates
 if METRIC_QUERIES == 'Standard':
    if (pd.to_datetime(EXP_START_DATE) < pd.to_datetime(standard_check['FIRST_DATE'][0])) or (pd.to_datetime(EXP_END_DATE) > pd.to_datetime(standard_check['LAST_DATE'][0])):
     dbutils.notebook.exit("Experiment Run dates exceed Standard Metric Data dates. Further tasks will be skipped")
 elif METRIC_QUERIES == 'DBFS Link':
   if (pd.to_datetime(EXP_START_DATE) < pd.to_datetime(dbfs_check['FIRST_DBFS_DATE'][0])) or (pd.to_datetime(EXP_END_DATE) > pd.to_datetime(dbfs_check['LAST_DBFS_DATE'][0])):
     dbutils.notebook.exit("Experiment Run dates exceed DBFS Link. Further tasks will be skipped")
+
+# COMMAND ----------
+
+# DBTITLE 1,CUSTOM Metric Flow
 if METRIC_QUERIES == 'Custom':
   dbutils.notebook.run(
     "/Workspace/Projects/Experimentation/aaml-experimentation-coe-dev/Workflows/EXP COE - Metric Workflow", 
@@ -329,8 +394,15 @@ if METRIC_QUERIES == 'Custom':
       "04. Metric Selection": "SAFE"
     }
   )
-%md
-# Exposures
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Exposures
+
+# COMMAND ----------
+
+# DBTITLE 1,Exposure Query
 if RUN_EXPOSURE == 'True':
   if EXP_PLATFORM == 'Adobe':
     exposure_query = (
@@ -448,6 +520,10 @@ if RUN_EXPOSURE == 'True':
   
   exposure_sp = spark.table(f'''experimentation.exposure_sp_raw_{EXPERIMENT_ID}''')
   exposure_sp.createOrReplaceTempView('exposure_sp')
+
+# COMMAND ----------
+
+# DBTITLE 1,SRM By Date
 from pyspark.sql import Window
 
 if EXP_PLATFORM != 'Household IDs':
@@ -479,6 +555,10 @@ if EXP_PLATFORM != 'Household IDs':
     exposure_diff.loc[exposure_diff['EXPOSURE_DATETIME'] == i, 'ADOBE_SRM p-value'] = round(srm_test(visitor_counts,exp_platform = EXP_PLATFORM)[1],4)
 
   display(exposure_diff.sort_values('EXPOSURE_DATETIME'))
+
+# COMMAND ----------
+
+# DBTITLE 1,Raw SRM Check
 if EXP_PLATFORM == 'Adobe':
   srm_check_raw = exposure_sp.groupBy('VARIANT_ID').agg(
                         F.countDistinct('HOUSEHOLD_ID').alias("HH_COUNT"),
@@ -488,6 +568,10 @@ if EXP_PLATFORM == 'Adobe':
 
   print('Adobe SRM p-value:', round(srm_test(srm_check_raw['Adobe_Count'],exp_platform = EXP_PLATFORM)[1],4))
   print('HH SRM p-value:', round(srm_test(srm_check_raw['HH_COUNT'],exp_platform = EXP_PLATFORM)[1],4))
+
+# COMMAND ----------
+
+# DBTITLE 1,Exposure Filter
 if EXPOSURE_FILTER == 'BNC':
   filter_query = (
     f"""
@@ -548,6 +632,10 @@ else:
   # exposure_table = 'experimentation.EXPOSURE_SP_{}'.format(EXPERIMENT_ID)
 
 print('Exposure Table: {}'.format(exposure_table))
+
+# COMMAND ----------
+
+# DBTITLE 1,Remove HHs that see 2 Variants but Include Null HH_IDs
 exposure_deduped_sp = spark.sql(f"""
 WITH 
 HH_DEDUPED as(
@@ -564,6 +652,10 @@ OR HOUSEHOLD_ID IN (SELECT * FROM HH_DEDUPED)
 
 exposure_table = 'exposure_deduped_with_nulls'
 exposure_deduped_sp.createOrReplaceTempView(f"{exposure_table}")
+
+# COMMAND ----------
+
+# DBTITLE 1,DeDuped SRM Check
 if EXP_PLATFORM == 'Adobe':
   srm_check_deduped = exposure_deduped_sp.groupBy('VARIANT_ID').agg(
                         F.countDistinct('HOUSEHOLD_ID').alias("HH_COUNT"),
@@ -578,6 +670,10 @@ if EXP_PLATFORM == 'Adobe':
   print('Adobe SRM p-value:', round(srm_test(srm_check_deduped['ADOBE_VISITORS'],exp_platform = EXP_PLATFORM)[1],4))
   print('Adobe wNull SRM p-value:', round(srm_test(srm_check_deduped['ADOBE_VISITORS_wNULL_HH'],exp_platform = EXP_PLATFORM)[1],4))
   print('HH SRM p-value:', round(srm_test(srm_check_deduped['HH_COUNT'],exp_platform = EXP_PLATFORM)[1],4))
+
+# COMMAND ----------
+
+# DBTITLE 1,Exposure Split by HH and Adobe Visitor
 #### For Adobe tests, break exposure table into visitors with household_ids and those without. ####
 if EXP_PLATFORM == 'Adobe':
   exposure_split = (spark.sql(f"""
@@ -625,6 +721,10 @@ exposure_split_sp = spark.table(f"experimentation.exposure_sp_{EXPERIMENT_ID}")
 
 exposure_table = 'exposure_split_sp'
 exposure_split_sp.createOrReplaceTempView(f"{exposure_table}")
+
+# COMMAND ----------
+
+# DBTITLE 1,Final SRM Check
 if EXP_PLATFORM == 'Adobe':
   srm_check_final = exposure_split_sp.groupBy('VARIANT_ID').agg(
                         F.countDistinct('HOUSEHOLD_ID').alias("HH_COUNT"),
@@ -647,6 +747,10 @@ else:
   display(srm_check_final)
 
   print('HH SRM p-value:', round(srm_test(srm_check_final['HH_COUNT'],exp_platform = EXP_PLATFORM)[1],4))
+
+# COMMAND ----------
+
+# DBTITLE 1,SRM Display
 if EXP_PLATFORM == 'Adobe':
   if round(srm_test(srm_check_raw['Adobe_Count'],exp_platform = EXP_PLATFORM)[1],4) < 0.01:
     srm_message_raw = f"""<h3><font color="red"> SAMPLE RATIO MISMATCH FOUND! p-value < 0.01 for Raw Adobe_Visitor_ID's </font></h3>"""
@@ -674,8 +778,15 @@ else:
 displayHTML(f"""{srm_message_raw}
             {srm_message_adobe}
             {srm_message_hh}""")
-%md
-# Metric Aggregation
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Metric Aggregation
+
+# COMMAND ----------
+
+# DBTITLE 1,Engagement Aggregation on Adobe_Visitor_ID
 visitor_id = """ID"""
 join_str = """CAST(e.ID AS STRING) = CAST(v.ID AS STRING)"""
 
@@ -788,6 +899,10 @@ agg_daily_AV_query = (f"""
 if EXP_PLATFORM == 'Adobe':
   agg_daily_AV = spark.sql(agg_daily_AV_query)
   agg_daily_AV.createOrReplaceTempView("engagement_agg_AV")
+
+# COMMAND ----------
+
+# DBTITLE 1,Engagement Aggregation on HOUSEHOLD_ID
 visitor_id = """HOUSEHOLD_ID"""
 join_str = """e.HOUSEHOLD_ID = v.HOUSEHOLD_ID"""
 
@@ -899,6 +1014,10 @@ agg_daily_HH_query = (f"""
   
 agg_daily_HH = spark.sql(agg_daily_HH_query)
 agg_daily_HH.createOrReplaceTempView("engagement_agg_HH")
+
+# COMMAND ----------
+
+# DBTITLE 1,Click-Hit Aggregation
 if EXP_PLATFORM == 'Adobe':
   engagement_sub_query = """
   SELECT * FROM engagement_agg_AV
@@ -1018,6 +1137,10 @@ SELECT
 
 agg_daily_sp = spark.sql(engagement_agg_query)
 # agg_daily_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Margin Aggregation
 margin_agg_query = (
   f"""
   WITH
@@ -1059,6 +1182,10 @@ margin_agg_query = (
 
 margin_agg_sp = spark.sql(margin_agg_query)
 #margin_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,AGP Aggregation
 agp_agg_query = (f"""
 WITH
 EXPOSURE_BASE AS(
@@ -1102,6 +1229,10 @@ ORDER BY 1
 
 agp_agg_sp = spark.sql(agp_agg_query)
 # agp_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Aggregation
 ecomm_txns_agg = (
 f"""
 WITH
@@ -1287,6 +1418,10 @@ SELECT t.*, r.* EXCEPT(r.VARIANT_ID)
 )
 ecomm_agg_sp = spark.sql(ecomm_txns_agg)
 # ecomm_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Aggregation
 store_txns_agg = (
 f"""
 WITH
@@ -1459,6 +1594,10 @@ SELECT t.*, r.* EXCEPT(r.VARIANT_ID)
 
 store_agg_sp = spark.sql(store_txns_agg)
 # store_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,TXNS Aggregation
 txns_agg = (
 f"""
 WITH
@@ -1525,6 +1664,10 @@ GROUP BY all
 
 txns_sp = spark.sql(txns_agg)
 #txns_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Redemptions Aggregation
 redemptions_agg = (
 f"""
 WITH
@@ -1631,6 +1774,10 @@ GROUP BY all
 
 redemptions_sp = spark.sql(redemptions_agg)
 #redemptions_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Bonus Points Query
 bp_query = f"""
 select SAFE_CAST(t.HOUSEHOLD_ID as BIGINT) as HOUSEHOLD_ID
       , DATE(t.TRANSACTION_TS) as TXN_DTE
@@ -1650,6 +1797,10 @@ bp_sp = bc.read_gcp_table(bp_query)
 bp_sp.cache()
 bp_sp.createOrReplaceTempView("bonus_points_temp")
 
+
+# COMMAND ----------
+
+# DBTITLE 1,Bonus Points Aggregation
 bp_agg_query = f"""
 WITH
 BONUS_POINTS_AGG AS(
@@ -1676,6 +1827,10 @@ group by all
 """
 bp_agg_sp = spark.sql(bp_agg_query)
 redemptions_sp = redemptions_sp.join(bp_agg_sp, on='VARIANT_ID', how='left')
+
+# COMMAND ----------
+
+# DBTITLE 1,Clips Aggregation
 clips_agg = (
 f"""
 WITH
@@ -1738,6 +1893,10 @@ GROUP BY all
 
 clips_agg_sp = spark.sql(clips_agg)
 #clips_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health Aggregation
 basket_health_agg = (
 f"""
 WITH
@@ -1788,6 +1947,10 @@ GROUP BY ALL
 
 basket_health_agg_sp = spark.sql(basket_health_agg)
 #clips_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Gas Aggregation
 gas_txns_agg = (
 f"""
 WITH
@@ -1843,6 +2006,10 @@ GROUP BY all
 
 gas_agg_sp = spark.sql(gas_txns_agg)
 # gas_agg_sp.display()
+
+# COMMAND ----------
+
+# DBTITLE 1,Category Aggregation
 category_agg_query = (f"""
 WITH
 EXPOSURE_BASE AS(
@@ -1881,6 +2048,10 @@ GROUP BY ALL
 
 category_agg_sp = spark.sql(category_agg_query)
 #display(category_agg_df)
+
+# COMMAND ----------
+
+# DBTITLE 1,Account Health Aggregation
 account_health_agg_query = (f"""
 WITH
 EXPOSURE_BASE AS(
@@ -1918,8 +2089,15 @@ GROUP BY ALL
 
 account_health_agg_sp = spark.sql(account_health_agg_query)
 #display(account_health_agg_df)
-%md
-# Margin Refresh and Fiscal Period Data Checks (***Deprecated***)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Margin Refresh and Fiscal Period Data Checks (***Deprecated***)
+
+# COMMAND ----------
+
+# DBTITLE 1,Margin Refresh Date
 # margin_refresh_query = (
 #   """
 #   SELECT MAX(DATE(DATA_LOAD_DATE)) AS LAST_LOAD_DATE
@@ -1937,6 +2115,10 @@ account_health_agg_sp = spark.sql(account_health_agg_query)
 # margin_refresh_date = margin_refresh_df['REFRESH_DATE'].iloc[0]
 # margin_load_date = margin_refresh_df['LAST_LOAD_DATE'].iloc[0]
 # print('Margin Valid Through:',margin_refresh_date, '\nLast Margin Load Date:', margin_load_date)
+
+# COMMAND ----------
+
+# DBTITLE 1,Fiscal Period Query
 # fp_query = (
 #   """
 # SELECT FISCAL_PERIOD_NBR
@@ -1961,8 +2143,15 @@ account_health_agg_sp = spark.sql(account_health_agg_query)
 #   next_margin_refresh_date = "NO MARGIN DATA AVALIABLE. PLEASE CHECK."
   
 # print('Next Margin Refresh: ',next_margin_refresh_date)
-%md
-# Overall Statistics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Overall Statistics
+
+# COMMAND ----------
+
+# DBTITLE 1,Engagement (Click Hit Data)
 base_df = agg_daily_sp.select("*").toPandas()
 base_df = base_df.sort_values('VARIANT_ID')
 
@@ -1992,6 +2181,10 @@ base_df_for_display ['UPO'] = base_df_for_display['UPO'].apply(lambda x: '{:,.4f
 base_df_for_display ['RPV'] = base_df_for_display['RPV'].apply(lambda x: '${:,.4f}'.format(x))
 
 display(base_df_for_display[['VARIANT_ID','VISITORS','UNIQUE_HOUSEHOLDS','AUTHENTICATED_RATE','VISITS_TOTAL','CART_ADDS_TOTAL','CART_ADDS_PER_CUSTOMER','CART_ADDS_CVR','COUPON_CLIPS_TOTAL','COUPON_CLIPS_PER_CUSTOMER','COUPON_CLIPS_CVR','SEARCHES_TOTAL','SEARCHES_PER_CUSTOMER','SEARCHES_CVR']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Margin (Weekly)
 try:
   margin_agg_df = margin_agg_sp.select("*").toPandas()
   margin_agg_df = margin_agg_df.sort_values('VARIANT_ID',ascending=True)
@@ -2005,6 +2198,10 @@ try:
   display(margin_df_for_display[['VARIANT_ID','MARGIN_TOTAL','MARGIN_PER_CUSTOMER']])
 except:
   print("Margin is not computed for this test.  Please check the last time that margin was updated.")
+
+# COMMAND ----------
+
+# DBTITLE 1,AGP
 agp_agg_df = agp_agg_sp.select("*").toPandas()
 agp_agg_df = agp_agg_df.sort_values('VARIANT_ID',ascending=True)
 
@@ -2017,6 +2214,10 @@ agp_df_for_display ['NET_SALES_TOTAL'] = agp_df_for_display['NET_SALES_TOTAL'].a
 agp_df_for_display ['NET_SALES_PER_CUSTOMER'] = agp_df_for_display['NET_SALES_MEAN'].apply(lambda x: '${:,.2f}'.format(x))
 
 display(agp_df_for_display[['VARIANT_ID','AGP_TOTAL','AGP_PER_CUSTOMER','NET_SALES_TOTAL','NET_SALES_PER_CUSTOMER']])
+
+# COMMAND ----------
+
+# DBTITLE 1,eComm TXNs and Redemptions
 # Convert the Spark DataFrame to a Pandas DataFrame and sort
 ecomm_agg_df = ecomm_agg_sp.select("*").toPandas()
 ecomm_agg_df = ecomm_agg_df.sort_values('VARIANT_ID')
@@ -2072,6 +2273,10 @@ display(ecomm_df_for_display[[
    'ECOMM_MKDN_TOTAL',
    'ECOMM_CVR'
 ]])
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store TXNs and Redemptions
 store_agg_df = store_agg_sp.select("*").toPandas()
 store_agg_df = store_agg_df.sort_values('VARIANT_ID')
 
@@ -2090,6 +2295,10 @@ store_df_for_display ['STORE_MKDN_TOTAL'] = store_df_for_display['STORE_MKDN_TOT
 store_df_for_display ['STORE_NONZERO_REVENUE_PER_CUSTOMER'] = store_df_for_display['STORE_REVENUE_NONZERO_MEAN'].apply(lambda x: '${:,.4f}'.format(x))
 
 display(store_df_for_display[['VARIANT_ID','PURCHASING_CUSTOMERS','STORE_UNITS_TOTAL','STORE_TXNS_TOTAL','STORE_REVENUE_TOTAL','STORE_AOV','STORE_UPO','STORE_REVENUE_PER_CUSTOMER','STORE_NONZERO_REVENUE_PER_CUSTOMER','UNIQUE_REDEEMERS_STORE','STORE_REDEMPTIONS_TOTAL','STORE_MKDN_TOTAL']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Gas TXNs and Redemptions
 try:
   gas_agg_df = gas_agg_sp.select("*").toPandas()
   gas_agg_df = gas_agg_df.sort_values('VARIANT_ID_GAS')
@@ -2107,6 +2316,10 @@ try:
   display(gas_df_for_display[['VARIANT_ID_GAS','PURCHASING_GAS_VISITORS','GAS_TXNS_TOTAL','GAS_REVENUE_TOTAL','GAS_AOV','GAS_REVENUE_PER_CUSTOMER','GAS_MKDN_PER_CUSTOMER','GAS_REWARD_REDEMPTIONS_TOTAL']])
 except:
   display("NO GAS TRANSACTION DATA.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Combined (Ecomm and In-Store) TXNs and Redemptions
 combined_df = txns_sp.select("*").toPandas()
 combined_df = combined_df.sort_values(['VARIANT_ID'],ascending=True)
 combined_for_display = combined_df.copy()
@@ -2127,6 +2340,10 @@ combined_for_display['CVR'] = combined_for_display['CVR'].apply(lambda x: '{:,.4
 
 
 display(combined_for_display[['VARIANT_ID','COMBINED_REVENUE_TOTAL','CVR','COMBINED_REVENUE_PER_CUSTOMER','COMBINED_NONZERO_REVENUE_PER_CUSTOMER','TXNS_TOTAL','UNITS_TOTAL','UNITS_PER_CUSTOMER']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Clips Breakdown
 clips_df = clips_agg_sp.select("*").toPandas()
 clips_df = clips_df.sort_values('VARIANT_ID', ascending=True)
 clips_for_display = clips_df[['VARIANT_ID','VISITORS','UNIQUE_CLIPPING_HH','CLIPS_TOTAL','CLIPS_MEAN','pd_clips_TOTAL','gr_clips_TOTAL','mf_clips_TOTAL', 'spd_clips_TOTAL', 'pzn_clips_TOTAL', 'sc_clips_TOTAL']].copy()
@@ -2148,6 +2365,10 @@ clips_for_display ['pzn_clips_TOTAL'] = ['{:,}'.format(i) for i in clips_for_dis
 
 display(clips_for_display[['VARIANT_ID','UNIQUE_CLIPPING_HH','% CLIPPING','CLIPS_TOTAL','CLIPS_PER_CUSTOMER','pd_clips_TOTAL','gr_clips_TOTAL','mf_clips_TOTAL', 'spd_clips_TOTAL',
        'pzn_clips_TOTAL', 'sc_clips_TOTAL']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Redemptions Breakdown
 redemptions_df = redemptions_sp.select("*").toPandas()
 redemptions_df = redemptions_df.sort_values('VARIANT_ID', ascending=True)
 redemptions_for_display = redemptions_df[['VARIANT_ID','VISITORS','REDEEMING_COUNT_COMBINED','REDEMPTIONS_TOTAL','REDEMPTIONS_MEAN','pd_redemptions_TOTAL','gr_redemptions_TOTAL','mf_redemptions_TOTAL', 'spd_redemptions_TOTAL','pzn_redemptions_TOTAL', 'sc_redemptions_TOTAL','MKDN_TOTAL','MKDN_MEAN','pd_MKDN_TOTAL', 'gr_MKDN_TOTAL', 'mf_MKDN_TOTAL', 'spd_MKDN_TOTAL', 'pzn_MKDN_TOTAL', 'sc_MKDN_TOTAL','BP_EARNING_HOUSEHOLDS','BONUS_POINTS_TOTAL','ESTIMATED_MKDN_TOTAL']].copy()
@@ -2183,10 +2404,18 @@ redemptions_for_display['ESTIMATED_MKDN_TOTAL'] = redemptions_for_display['ESTIM
 
 display(redemptions_for_display[['VARIANT_ID','UNIQUE_REDEEMERS','% REDEEMING','REDEMPTIONS_TOTAL','pd_redemptions_TOTAL','gr_redemptions_TOTAL','mf_redemptions_TOTAL', 'spd_redemptions_TOTAL',
        'pzn_redemptions_TOTAL', 'sc_redemptions_TOTAL','% BP EARNING','BONUS_POINTS_TOTAL','ESTIMATED_MKDN_TOTAL']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Markdown Breakdown
 markdown_for_display = redemptions_for_display.merge(store_df_for_display[['VARIANT_ID','STORE_MKDN_TOTAL']],on='VARIANT_ID', how='left')
 markdown_for_display = markdown_for_display.merge(ecomm_df_for_display[['VARIANT_ID','ECOMM_MKDN_TOTAL']],on='VARIANT_ID', how='left')
 
 display(markdown_for_display[['VARIANT_ID','MKDN_TOTAL','ECOMM_MKDN_TOTAL','STORE_MKDN_TOTAL','pd_MKDN_TOTAL', 'gr_MKDN_TOTAL', 'mf_MKDN_TOTAL', 'spd_MKDN_TOTAL', 'pzn_MKDN_TOTAL', 'sc_MKDN_TOTAL']])
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health
 basket_health_df = basket_health_agg_sp.select("*").toPandas()
 basket_health_df = basket_health_df.sort_values('VARIANT_ID', ascending=True)
 bh_for_display = basket_health_df[['VARIANT_ID','VISITORS','UNIQUE_BASKET_HEALTH_HH','BASKET_RATE_TOTAL','BASKET_RATE_MEAN','AB_RATE_TOTAL','AB_RATE_MEAN','DE_RATE_TOTAL', 'DE_RATE_MEAN', 'TOTAL_BASKET_HEALTH_TXNS']].copy()
@@ -2205,6 +2434,10 @@ bh_for_display ['% BASKET TXNS'] = bh_for_display['% BASKET TXNS'].apply(lambda 
 
 display(bh_for_display[['VARIANT_ID','UNIQUE_BASKET_HEALTH_HH','% BASKET HEALTH HH','NET_BASKET_RATE_TOTAL','NET_BASKET_RATE_MEAN','AB_RATE_MEAN','DE_RATE_MEAN','TOTAL_BASKET_HEALTH_TXNS', '% BASKET TXNS']])
 
+
+# COMMAND ----------
+
+# DBTITLE 1,Category Depth And Breadth
 category_breadth_depth_df = category_agg_sp.select("*").toPandas()
 category_breadth_depth_df = category_breadth_depth_df.sort_values('VARIANT_ID', ascending=True)
 
@@ -2216,6 +2449,10 @@ for col in ['CATEGORIES_MEAN', 'CATEGORIES_SD', 'ITEMS_MEAN', 'ITEMS_SD', 'CATEG
     category_breadth_depth_df[col] = category_breadth_depth_df[col].round(4)
 
 display(category_breadth_depth_df)
+
+# COMMAND ----------
+
+# DBTITLE 1,Account Health
 account_health_agg_df = account_health_agg_sp.select("*").toPandas()
 account_health_agg_df = account_health_agg_df.sort_values('VARIANT_ID', ascending=True)
 
@@ -2223,6 +2460,10 @@ account_health_display = account_health_agg_df[['VARIANT_ID','UNIQUE_HOUSEHOLDS'
 columns_to_format = ['UNIQUE_HOUSEHOLDS','email_count', 'phone_count', 'fn_ln_count', 'bday_count', 'address_count']
 account_health_display[columns_to_format] = account_health_display[columns_to_format].applymap(lambda x: f"{x:,}")
 display(account_health_display)
+
+# COMMAND ----------
+
+# DBTITLE 1,Output Table
 summary_table1 = base_df_for_display[['VARIANT_ID','VISITORS','UNIQUE_HOUSEHOLDS','AUTHENTICATED_RATE','VISITS_TOTAL','VISITS_PER_CUSTOMER','SEARCHES_TOTAL','SEARCHES_PER_CUSTOMER','SEARCHES_CVR','CART_ADDS_TOTAL','CART_ADDS_PER_CUSTOMER','CART_ADDS_CVR','COUPON_CLIPS_TOTAL','COUPON_CLIPS_PER_CUSTOMER','COUPON_CLIPS_CVR']].merge(
     combined_for_display[['VARIANT_ID','UNITS_TOTAL','UNITS_PER_CUSTOMER','TXNS_TOTAL','TXNS_PER_CUSTOMER','COMBINED_REVENUE_TOTAL','COMBINED_REVENUE_PER_CUSTOMER','COMBINED_NONZERO_REVENUE_PER_CUSTOMER','CVR','AOV','UPO']],
     on='VARIANT_ID', how='left'
@@ -2245,10 +2486,17 @@ output_table = summary_table5[['VARIANT_ID','VISITORS','COMBINED_REVENUE_PER_CUS
 output_table = output_table.rename(columns={"CATEGORIES_MEAN": "CATEGORY_BREADTH"})
 
 display(output_table)
+
+# COMMAND ----------
+
+# DBTITLE 1,Summary Table
 ## TODO - We may be able to delete this cell
 summary_table4 = summary_table4[['VARIANT_ID','UNIQUE_HOUSEHOLDS','COMBINED_REVENUE_PER_CUSTOMER','COMBINED_NONZERO_REVENUE_PER_CUSTOMER','NET_SALES_PER_CUSTOMER','CVR','MKDN_PER_CUSTOMER','AGP_PER_CUSTOMER','TXNS_PER_CUSTOMER','UNITS_PER_CUSTOMER','VISITS_PER_CUSTOMER','SEARCHES_PER_CUSTOMER','CART_ADDS_PER_CUSTOMER','COUPON_CLIPS_PER_CUSTOMER','MARGIN_PER_CUSTOMER','REDEMPTIONS_PER_CUSTOMER']]
 
 display(summary_table4)
+
+# COMMAND ----------
+
 if WINSORIZE != 'OFF':
 
   if round(ecomm_agg_df['WINSORIZATION_THRESHOLD'].iloc[0],2) == 0:
@@ -2286,6 +2534,9 @@ if WINSORIZE != 'OFF':
 else:
     displayHTML(f"""<h3><font color="black"> Winsorization is turned OFF for this experiment analysis. </font></h3> 
     """)
+
+# COMMAND ----------
+
 if WINSORIZE != 'OFF':
   win_df_ecomm = pd.DataFrame({
     "Variant": ecomm_agg_df['VARIANT_ID'],
@@ -2306,8 +2557,15 @@ if WINSORIZE != 'OFF':
   })
 
   display(win_df_combined.merge(win_df_store, on = 'Variant').merge(win_df_ecomm, on = 'Variant'))
-%md
-# Experiment Details & Health Checks
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Experiment Details & Health Checks
+
+# COMMAND ----------
+
+# DBTITLE 1,Experiment Details
 current_time = str(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S"))
 
 if PAGE_FILTER_INPUT:
@@ -2333,8 +2591,15 @@ displayHTML(f"""<h3><font color="grey"> Experiment: {EXPERIMENT_ID} conducted fr
           <h3><font color="grey"> App filter: {OS_PLATFORM} </font></h3> 
           <h3><font color="grey"> Detailed Output Table: {output_table_link} </font></h3>
            """)
-%md
-# Summary Metrics (In-Store + Ecomm)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Summary Metrics (In-Store + Ecomm)
+
+# COMMAND ----------
+
+# DBTITLE 1,Customers
 # This test is for final DataFrame
 visitors_test = hypothesis_test_compare_means(
     df = base_df,
@@ -2352,6 +2617,10 @@ visitors_test = hypothesis_test_compare_means(
     )
 
 display(visitors_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Visits Per Customer
 sessions_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2368,7 +2637,15 @@ sessions_test = hypothesis_test_compare_means(
     )
 
 display(sessions_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Visits Per Customer
 sessions_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Revenue Per Customer (RPC)
 revenue_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2385,7 +2662,15 @@ revenue_test = hypothesis_test_compare_means(
     )
 
 display(revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,RPC
 revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Non-Zero Revenue Per Customer (RPC)
 nz_revenue_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2402,7 +2687,15 @@ nz_revenue_test = hypothesis_test_compare_means(
     )
 
 display(nz_revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,NONZERO RPC
 nz_revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average AGP Per Customer
 agp_test = hypothesis_test_compare_means(
     df = agp_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -2419,7 +2712,15 @@ agp_test = hypothesis_test_compare_means(
     )
 
 display(agp_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,AGP Per Customer
 agp_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Net Sales Per Customer
 net_sales_test = hypothesis_test_compare_means(
     df = agp_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -2436,7 +2737,15 @@ net_sales_test = hypothesis_test_compare_means(
     )
 
 display(net_sales_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Net Sales Per Customer
 net_sales_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Margin Per Customer
 try:
   margin_test = hypothesis_test_compare_means(
       df = margin_agg_df,
@@ -2456,10 +2765,18 @@ try:
   display(margin_test[0])
 except:
   print("Margin is not computed for this test.  Please check the last time that margin was updated.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Margin Per Customer
 try:
   margin_test[1].show()
 except:
   print("Margin is not computed for this test.  Please check the last time that margin was updated.")
+
+# COMMAND ----------
+
+# DBTITLE 1,Average TXNs Per Customer
 orders_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2476,7 +2793,15 @@ orders_test = hypothesis_test_compare_means(
     )
 
 display(orders_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,TXNs Per Customer
 orders_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Units Sold Per Customer
 units_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2493,7 +2818,15 @@ units_test = hypothesis_test_compare_means(
     )
 
 display(units_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Units Per Customer
 units_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Total Redemptions Per Customer
 coupon_redemptions_test = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2510,7 +2843,15 @@ coupon_redemptions_test = hypothesis_test_compare_means(
     )
 
 display(coupon_redemptions_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Redemptions Per Customer
 coupon_redemptions_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Total Markdown Per Customer
 mkdn_test = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2527,7 +2868,15 @@ mkdn_test = hypothesis_test_compare_means(
     )
 
 display(mkdn_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Markdown Per Customer
 mkdn_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Order Value
 AOV_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2545,7 +2894,15 @@ AOV_test = hypothesis_test_compare_means(
     )
 
 display(AOV_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,AOV
 AOV_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Units Per Order (Basket Size)
 UPO_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2563,9 +2920,20 @@ UPO_test = hypothesis_test_compare_means(
     )
 
 display(UPO_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,UPO
 UPO_test[1].show()
-%md
-# Engagement Metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Engagement Metrics
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Cart Adds Per Customer
 cartadds_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2582,7 +2950,15 @@ cartadds_test = hypothesis_test_compare_means(
     )
 
 display(cartadds_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Cart Adds Per Customer
 cartadds_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Coupon Clips Per Customer
 ACC_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2599,7 +2975,15 @@ ACC_test = hypothesis_test_compare_means(
     )
 
 display(ACC_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Coupon Clips Per Customer
 ACC_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Searches Per Customer
 searches_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2616,7 +3000,15 @@ searches_test = hypothesis_test_compare_means(
     )
 
 display(searches_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Searches Per Customer
 searches_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Add to Cart CVR
 cartadds_cvr_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2634,7 +3026,15 @@ cartadds_cvr_test = hypothesis_test_compare_means(
 
 display(cartadds_cvr_test[0])
 
+
+# COMMAND ----------
+
+# DBTITLE 1,ATC CVR
 cartadds_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Transactions CVR
 orders_cvr_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -2651,7 +3051,15 @@ orders_cvr_test = hypothesis_test_compare_means(
     )
 
 display(orders_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,TXNs CVR
 orders_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Coupon Clips CVR
 couponclips_cvr_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2668,7 +3076,15 @@ couponclips_cvr_test = hypothesis_test_compare_means(
     )
 
 display(couponclips_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,CC CVR
 couponclips_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Search CVR
 search_cvr_test = hypothesis_test_compare_means(
     df = base_df,
     variant_column_name = "VARIANT_ID",
@@ -2685,9 +3101,20 @@ search_cvr_test = hypothesis_test_compare_means(
     )
 
 display(search_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,SRCH CVR
 search_cvr_test[1].show()
-%md
-# Clips
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Clips
+
+# COMMAND ----------
+
+# DBTITLE 1,Total Clips (LOY_CLIPS)
 clipping_count = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2704,7 +3131,15 @@ clipping_count = hypothesis_test_compare_means(
     )
 
 display(clipping_count[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,LOY CLIPS
 clipping_count[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Store Coupon Clips
 sc_clips = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2721,7 +3156,15 @@ sc_clips = hypothesis_test_compare_means(
     )
 
 display(sc_clips[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,STORE CLIPS
 sc_clips[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Manufacturer Coupon Clips
 mf_clips = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2738,7 +3181,15 @@ mf_clips = hypothesis_test_compare_means(
     )
 
 display(mf_clips[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,MANUFACTURE CLIPS
 mf_clips[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Grocery Reward Clips
 gr_clips = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2755,7 +3206,15 @@ gr_clips = hypothesis_test_compare_means(
     )
 
 display(gr_clips[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,GROCERY REWARD CLIPS
 gr_clips[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Personalized Deals Clips
 pd_clips = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2772,7 +3231,15 @@ pd_clips = hypothesis_test_compare_means(
     )
 
 display(pd_clips[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,PD CLIPS
 pd_clips[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Special-Personalized Deals Clips
 spd_clips = hypothesis_test_compare_means(
     df = clips_df,
     variant_column_name = "VARIANT_ID",
@@ -2789,7 +3256,15 @@ spd_clips = hypothesis_test_compare_means(
     )
 
 display(spd_clips[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,SPD CLIPS
 spd_clips[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,PZN-Personalized Deals Clips
 try:
     pzn_clips = hypothesis_test_compare_means(
         df = clips_df,
@@ -2809,12 +3284,23 @@ try:
     display(pzn_clips[0])
 except:
     print('No PZN deals')
+
+# COMMAND ----------
+
+# DBTITLE 1,PZN PD CLIPS
 try:
   pzn_clips[1].show()
 except:
     print('No PZN deals')
-%md
-# Redemptions
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Redemptions
+
+# COMMAND ----------
+
+# DBTITLE 1,Unique Redeemers 
 redeeming_count = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2831,7 +3317,15 @@ redeeming_count = hypothesis_test_compare_means(
     )
 
 display(redeeming_count[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,UNIQUE REDEEMERS
 redeeming_count[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Total Redemptions Per Customer Ecomm
 coupon_redemptions_ecomm_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -2848,7 +3342,15 @@ coupon_redemptions_ecomm_test = hypothesis_test_compare_means(
     )
 
 display(coupon_redemptions_ecomm_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Redemptions Per Customer
 coupon_redemptions_ecomm_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Total Redemptions Per Customer In-Store
 coupon_redemptions_store_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -2865,7 +3367,15 @@ coupon_redemptions_store_test = hypothesis_test_compare_means(
     )
 
 display(coupon_redemptions_store_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,In Store Redemptions Per Customer
 coupon_redemptions_store_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Store Coupon Redemptions
 sc_redemptions = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2882,7 +3392,15 @@ sc_redemptions = hypothesis_test_compare_means(
     )
 
 display(sc_redemptions[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,STORE COUPON REDEMPTIONS
 sc_redemptions[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Manufacturer Coupon Redemptions
 mf_redemptions = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2899,7 +3417,15 @@ mf_redemptions = hypothesis_test_compare_means(
     )
 
 display(mf_redemptions[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,MANUFACTURER COUPON REDEMPTIONS
 mf_redemptions[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Grocery Reward Redemptions
 gr_redemptions = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2916,7 +3442,15 @@ gr_redemptions = hypothesis_test_compare_means(
     )
 
 display(gr_redemptions[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,GROCERY REWARDS REDEMPTIONS
 gr_redemptions[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Personalized Deals Redemptions
 pd_redemptions = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2933,7 +3467,15 @@ pd_redemptions = hypothesis_test_compare_means(
     )
 
 display(pd_redemptions[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,PD REDEMPTIONS
 pd_redemptions[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Special-Personalized Deals Redemptions
 spd_redemptions = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -2950,7 +3492,15 @@ spd_redemptions = hypothesis_test_compare_means(
     )
 
 display(spd_redemptions[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,SPD Redemptions
 spd_redemptions[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,PZN-Personalized Deals Redemptions
 try:
     pzn_redemptions = hypothesis_test_compare_means(
         df = redemptions_df,
@@ -2970,12 +3520,23 @@ try:
     display(pzn_redemptions[0])
 except:
     print('No PZN deals')
+
+# COMMAND ----------
+
+# DBTITLE 1,PZN PD REDEMPTIONS
 try:
   pzn_redemptions[1].show()
 except:
     print('No PZN deals')
-%md
-# Categories
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Categories
+
+# COMMAND ----------
+
+# DBTITLE 1,Categories Breadth Test
 CB_test = hypothesis_test_compare_means(
     df = category_breadth_depth_df,
     variant_column_name = "VARIANT_ID",
@@ -2992,7 +3553,14 @@ CB_test = hypothesis_test_compare_means(
     )
 
 display(CB_test[0])
+
+# COMMAND ----------
+
 CB_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Category Depth Test
 CD_test = hypothesis_test_compare_means(
     df = category_breadth_depth_df,
     variant_column_name = "VARIANT_ID",
@@ -3010,9 +3578,19 @@ CD_test = hypothesis_test_compare_means(
     )
 
 display(CD_test[0])
+
+# COMMAND ----------
+
 CD_test[1].show()
-%md
-# Account Health
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Account Health
+
+# COMMAND ----------
+
+# DBTITLE 1,E-mail Test
 acc_email_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3029,7 +3607,14 @@ acc_email_test = hypothesis_test_compare_means(
     )
 
 display(acc_email_test[0])
+
+# COMMAND ----------
+
 acc_email_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Phone Test
 acc_phone_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3046,7 +3631,14 @@ acc_phone_test = hypothesis_test_compare_means(
     )
 
 display(acc_phone_test[0])
+
+# COMMAND ----------
+
 acc_phone_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Reachability Test
 acc_reachablity_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3063,7 +3655,14 @@ acc_reachablity_test = hypothesis_test_compare_means(
     )
 
 display(acc_reachablity_test[0])
+
+# COMMAND ----------
+
 acc_reachablity_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Name Fill Test
 acc_namefill_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3080,7 +3679,14 @@ acc_namefill_test = hypothesis_test_compare_means(
     )
 
 display(acc_namefill_test[0])
+
+# COMMAND ----------
+
 acc_namefill_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Birth Date Test
 acc_bd_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3097,7 +3703,14 @@ acc_bd_test = hypothesis_test_compare_means(
     )
 
 display(acc_bd_test[0])
+
+# COMMAND ----------
+
 acc_bd_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Address Fill Test
 acc_address_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3114,7 +3727,14 @@ acc_address_test = hypothesis_test_compare_means(
     )
 
 display(acc_address_test[0])
+
+# COMMAND ----------
+
 acc_address_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Health Score Test
 acc_health_test = hypothesis_test_compare_means(
     df = account_health_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3130,9 +3750,19 @@ acc_health_test = hypothesis_test_compare_means(
     rounding = 4
     )
 display(acc_health_test[0])
+
+# COMMAND ----------
+
 acc_health_test[1].show()
-%md
-# Markdown
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Markdown
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Store Coupon Markdown Per Customer
 sc_mkdn = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -3149,7 +3779,15 @@ sc_mkdn = hypothesis_test_compare_means(
     )
 
 display(sc_mkdn[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,STORE COUPON MARKDOWN PER CUSTOMER
 sc_mkdn[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Manufacturer Coupon Markdown Per Customer
 mf_mkdn = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -3166,7 +3804,15 @@ mf_mkdn = hypothesis_test_compare_means(
     )
 
 display(mf_mkdn[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,MANUFACTURER MARKDOWN
 mf_mkdn[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Grocery Rewards Markdown Per Customer
 gr_mkdn = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -3183,7 +3829,15 @@ gr_mkdn = hypothesis_test_compare_means(
     )
 
 display(gr_mkdn[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,GROCERY REWARDS MARKDOWN
 gr_mkdn[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Personalized Deals Markdown Per Customer
 pd_mkdn = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -3200,7 +3854,15 @@ pd_mkdn = hypothesis_test_compare_means(
     )
 
 display(pd_mkdn[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,PD DEALS MARKDOWN
 pd_mkdn[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average Special-Personalized Deals Markdown Per Customer
 spd_mkdn = hypothesis_test_compare_means(
     df = redemptions_df,
     variant_column_name = "VARIANT_ID",
@@ -3217,7 +3879,15 @@ spd_mkdn = hypothesis_test_compare_means(
     )
 
 display(spd_mkdn[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,SPD DEALS MARKDOWN
 spd_mkdn[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Average PZN-Personalized Deals Markdown Per Customer
 try:
   pzn_mkdn = hypothesis_test_compare_means(
     df = combined_df,
@@ -3237,12 +3907,23 @@ try:
   display(pzn_mkdn[0])
 except:
   print('No PZN deals')
+
+# COMMAND ----------
+
+# DBTITLE 1,PZN PD DEALS MARKDOWN
 try:
   pzn_mkdn[1].show()
 except:
   print('No PZN deals')
-%md
-# Ecomm Metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Ecomm Metrics
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Revenue Per Customer
 ecomm_revenue_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3259,7 +3940,15 @@ ecomm_revenue_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM RPC
 ecomm_revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Non-Zero Revenue Per Customer
 ## ECOMM non-zero Revenue
 ecomm_nonzero_revenue_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
@@ -3277,7 +3966,15 @@ ecomm_nonzero_revenue_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_nonzero_revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM NONZERO RPC
 ecomm_nonzero_revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Order CVR
 ## E-Com Order Conversion Rate
 ecomm_orders_cvr_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
@@ -3295,7 +3992,15 @@ ecomm_orders_cvr_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_orders_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM ORDER CVR
 ecomm_orders_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm TXNs Per Customer
 
 ecomm_orders_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
@@ -3313,7 +4018,15 @@ ecomm_orders_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_orders_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM TXNS PER CUSTOMER
 ecomm_orders_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Units Per Customer
 ecomm_units_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3330,7 +4043,15 @@ ecomm_units_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_units_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM UNITS PER CUSTOMER
 ecomm_units_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Average Order Value (AOV)
 ecomm_AOV_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3348,7 +4069,14 @@ ecomm_AOV_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_AOV_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM AOV
 ecomm_AOV_test[1].show()
+
+# COMMAND ----------
+
 ## ECOMM non-zero aov
 ecomm_AOV_nonzero_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
@@ -3367,7 +4095,14 @@ ecomm_AOV_nonzero_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_AOV_nonzero_test[0])
+
+# COMMAND ----------
+
 ecomm_AOV_nonzero_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Units Per Order (Basket Size)
 ecomm_UPO_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3385,7 +4120,15 @@ ecomm_UPO_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_UPO_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM UPO
 ecomm_UPO_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,E-Comm Average Markdown Per Customer
 ecomm_markdown_pc_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3402,7 +4145,15 @@ ecomm_markdown_pc_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_markdown_pc_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,ECOMM MKDN PER CUSTOMER
 ecomm_markdown_pc_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,E-Comm BNC Test
 ecomm_bnc_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3419,7 +4170,14 @@ ecomm_bnc_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_bnc_test[0])
+
+# COMMAND ----------
+
 ecomm_bnc_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,E-Comm BNC CVR Test
 ecomm_bnc_cvr_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3436,7 +4194,15 @@ ecomm_bnc_cvr_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_bnc_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,BNC CVR
 ecomm_bnc_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Net Sales Test
 ecomm_net_sales_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3453,7 +4219,14 @@ ecomm_net_sales_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_net_sales_test[0])
+
+# COMMAND ----------
+
 ecomm_net_sales_test[1]
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Non Zero Net Sales Test
 ecomm_nz_net_sales_test = hypothesis_test_compare_means(
     df = ecomm_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3470,9 +4243,19 @@ ecomm_nz_net_sales_test = hypothesis_test_compare_means(
     )
 
 display(ecomm_nz_net_sales_test[0])
+
+# COMMAND ----------
+
 ecomm_nz_net_sales_test[1]
-%md
-# In-Store Metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # In-Store Metrics
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Revenue Per Customer
 store_revenue_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3489,7 +4272,15 @@ store_revenue_test = hypothesis_test_compare_means(
     )
 
 display(store_revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store RPC
 store_revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store NonZero Revenue Per Customer
 ## Store non-zero revenue
 store_revenue_nonzero_test = hypothesis_test_compare_means(
     df = store_agg_df,
@@ -3507,7 +4298,15 @@ store_revenue_nonzero_test = hypothesis_test_compare_means(
     )
 
 display(store_revenue_nonzero_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE NONZERO RPC
 store_revenue_nonzero_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Order CVR
 ## In-Store Order Conversion Rate
 store_orders_cvr_test = hypothesis_test_compare_means(
     df = store_agg_df,
@@ -3525,7 +4324,15 @@ store_orders_cvr_test = hypothesis_test_compare_means(
     )
 
 display(store_orders_cvr_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE ORDER CVR
 store_orders_cvr_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store TXNs Per Customer
 store_orders_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3542,7 +4349,15 @@ store_orders_test = hypothesis_test_compare_means(
     )
 
 display(store_orders_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE TXNs PER CUSTOMER
 store_orders_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Average Units Sold Per Customer
 store_units_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3559,7 +4374,15 @@ store_units_test = hypothesis_test_compare_means(
     )
 
 display(store_units_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE UNITS PER CUSTOMER
 store_units_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Average Order Value (AOV)
 store_AOV_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3577,7 +4400,14 @@ store_AOV_test = hypothesis_test_compare_means(
     )
 
 display(store_AOV_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE AOV
 store_AOV_test[1].show()
+
+# COMMAND ----------
+
 ## Store non-zero aov
 
 store_AOV_nonzero_test = hypothesis_test_compare_means(
@@ -3597,7 +4427,14 @@ store_AOV_nonzero_test = hypothesis_test_compare_means(
     )
 
 display(store_AOV_nonzero_test[0])
+
+# COMMAND ----------
+
 store_AOV_nonzero_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Average Units Per Order (Basket Size)
 store_UPO_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3615,7 +4452,15 @@ store_UPO_test = hypothesis_test_compare_means(
     )
 
 display(store_UPO_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,IN-STORE UPO
 store_UPO_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,In-Store Average Markdown Per Customer
 store_markdown_pc_test = hypothesis_test_compare_means(
     df = store_agg_df,
     variant_column_name = "VARIANT_ID",
@@ -3632,9 +4477,20 @@ store_markdown_pc_test = hypothesis_test_compare_means(
     )
 
 display(store_markdown_pc_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,INSTORE MKDN PER CUSTOMER
 store_markdown_pc_test[1].show()
-%md
-# Basket Health
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Basket Health
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health Mean Rate
 bh_test = hypothesis_test_compare_means(
     df = basket_health_df,
     variant_column_name = "VARIANT_ID",
@@ -3651,7 +4507,15 @@ bh_test = hypothesis_test_compare_means(
     )
 
 display(bh_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health Mean Rate
 bh_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health (AB) Mean Rate
 bh_ab_test = hypothesis_test_compare_means(
     df = basket_health_df,
     variant_column_name = "VARIANT_ID",
@@ -3668,7 +4532,15 @@ bh_ab_test = hypothesis_test_compare_means(
     )
 
 display(bh_ab_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health (AB) Mean Rate
 bh_ab_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health (DE) Mean Rate
 bh_de_test = hypothesis_test_compare_means(
     df = basket_health_df,
     variant_column_name = "VARIANT_ID",
@@ -3685,9 +4557,20 @@ bh_de_test = hypothesis_test_compare_means(
     )
 
 display(bh_de_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Basket Health (DE) Mean Rate
 bh_de_test[1].show()
-%md
-# SNAP Metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # SNAP Metrics
+
+# COMMAND ----------
+
+# DBTITLE 1,Combined SNAP Tender Per Customer
 snap_test = hypothesis_test_compare_means(
     df = combined_df,
     variant_column_name = "VARIANT_ID",
@@ -3704,9 +4587,20 @@ snap_test = hypothesis_test_compare_means(
     )
 
 display(snap_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,SNAP PER CUSTOMER
 snap_test[1].show()
-%md
-# Gas Metrics
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Gas Metrics
+
+# COMMAND ----------
+
+# DBTITLE 1,Gas Revenue Per Customer
 gas_revenue_test = hypothesis_test_compare_means(
     df = gas_agg_df,
     variant_column_name = "VARIANT_ID_GAS",
@@ -3723,7 +4617,15 @@ gas_revenue_test = hypothesis_test_compare_means(
     )
 
 display(gas_revenue_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,GAS REVENUE PER CUSTOMER
 gas_revenue_test[1].show()
+
+# COMMAND ----------
+
+# DBTITLE 1,Gas Markdown
 gas_mkdn_test = hypothesis_test_compare_means(
     df = gas_agg_df,
     variant_column_name = "VARIANT_ID_GAS",
@@ -3740,9 +4642,18 @@ gas_mkdn_test = hypothesis_test_compare_means(
     )
 
 display(gas_mkdn_test[0])
+
+# COMMAND ----------
+
 gas_mkdn_test[1].show()
-%md
-### EMAIL/PUSH/SMS HYPOTHESIS TEST 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### EMAIL/PUSH/SMS HYPOTHESIS TEST 
+
+# COMMAND ----------
+
 # email_optin_test = hypothesis_test_compare_means(
 #     df = combined_df,
 #     variant_column_name = "VARIANT_ID",
@@ -3759,6 +4670,9 @@ gas_mkdn_test[1].show()
 #     )
 
 # display(email_optin_test[0])
+
+# COMMAND ----------
+
 # email_optin_test = hypothesis_test_compare_means(
 #     df = combined_df,
 #     variant_column_name = "VARIANT_ID",
@@ -3775,6 +4689,9 @@ gas_mkdn_test[1].show()
 #     )
 
 # display(email_optin_test[0])
+
+# COMMAND ----------
+
 # push_enabled_test = hypothesis_test_compare_means(
 #     df = combined_df,
 #     variant_column_name = "VARIANT_ID",
@@ -3791,6 +4708,10 @@ gas_mkdn_test[1].show()
 #     )
 
 # display(push_enabled_test[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Results Summary
 # Function to process test results into a structured format
 def process_ttest_result(df, metric_name):
    if df is None or df.empty:
@@ -3864,6 +4785,10 @@ summary_df = pd.concat([variant_column] + summary_dfs, axis=1)
 summary_df.reset_index(drop=True, inplace=True)
 # Display the structured DataFrame in Databricks
 display(summary_df) 
+
+# COMMAND ----------
+
+# DBTITLE 1,Numeriic Results Summary
 import pandas as pd
 import numpy as np
 # Function to process test results into structured format
@@ -3965,6 +4890,10 @@ if summary_dfs:
    display(summary_df)
 else:
    print("No valid data to display")
+
+# COMMAND ----------
+
+# DBTITLE 1,Formatting
 def process_ttest_result(df, metric_name):
    if df is None or df.empty:
        print(f"Skipping {metric_name} due to missing data")
@@ -4108,6 +5037,10 @@ if summary_dfs:
    display(formatted_df)
 else:
    print("No valid data to display")
+
+# COMMAND ----------
+
+# DBTITLE 1,Scroll Table
 # def style_summary_table(formatted_df):
 #    """Generate 1920px-fixed table with restored header colors"""
 #    df = formatted_df.copy().fillna('')
@@ -4286,6 +5219,10 @@ else:
 #    return styled_html
 # # Usage formatted_df
 # displayHTML(style_summary_table(formatted_df))
+
+# COMMAND ----------
+
+# DBTITLE 1,Break Out Table
 def style_summary_table(formatted_df):
    """Generate three 1920px-fixed tables with improved border visibility"""
    df = formatted_df.copy().fillna('')
@@ -4488,12 +5425,28 @@ def style_summary_table(formatted_df):
 # displayHTML(style_summary_table(formatted_df)[0])  # Transaction
 # displayHTML(style_summary_table(formatted_df)[1])  # Engagement
 # displayHTML(style_summary_table(formatted_df)[2])  # Ecomm
+
+# COMMAND ----------
+
+# DBTITLE 1,Transaction Metrics Display
 #Transaction Metrics
 displayHTML(style_summary_table(formatted_df)[0])
+
+# COMMAND ----------
+
+# DBTITLE 1,Engagement Metrics Display
 # Engagement Metrics  
 displayHTML(style_summary_table(formatted_df)[1])
+
+# COMMAND ----------
+
+# DBTITLE 1,Ecomm Metrics Display
 # Ecomm Metrics
 displayHTML(style_summary_table(formatted_df)[2])
+
+# COMMAND ----------
+
+# DBTITLE 1,Power Display
 power_result_df = spark.sql("select * from db_work.POWER_OUTPUT_RESULTS")
 experiment_power_df = power_result_df.filter(power_result_df['EXPERIMENT_ID'] == EXPERIMENT_ID).toPandas()
 if not experiment_power_df.empty:
@@ -4603,6 +5556,9 @@ else:
 </div>
    """
    displayHTML(error_html)
+
+# COMMAND ----------
+
 def create_dashboard_element(summary_df):
    """Create key metrics summary with guaranteed data population and styling"""
    # ================================
@@ -4724,3 +5680,9 @@ def create_dashboard_element(summary_df):
    return styled_html
 # Display in Databricks
 displayHTML(create_dashboard_element(summary_df))
+
+# COMMAND ----------
+
+
+Get Outlook for Mac
+
